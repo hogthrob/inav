@@ -49,67 +49,116 @@ typedef struct
     int (*readBytes)(uint32_t address, uint8_t *buffer, int length);
     void (*flush)(void);
     const flashGeometry_t *(*getGeometry)(void);
-    bool detected;
 } flashDriver_t;
 
-static flashDriver_t flashDrivers[] = {
+bool(dummy_init)(int flashNumToUse)
+{
+    UNUSED(flashNumToUse);
+
+    return false;
+}
+bool(dummy_isReady)(void) { return true; }
+bool(dummy_waitForReady)(timeMs_t timeoutMillis)
+{
+    UNUSED(timeoutMillis);
+
+    return true;
+}
+void(dummy_eraseSector)(uint32_t address) { UNUSED(address); }
+void(dummy_eraseCompletely)(void) {}
+uint32_t(dummy_pageProgram)(uint32_t address, const uint8_t *data, int length)
+{
+    UNUSED(address);
+    UNUSED(data);
+    UNUSED(length);
+
+    return 0;
+}
+int(dummy_readBytes)(uint32_t address, uint8_t *buffer, int length)
+{
+    UNUSED(address);
+    UNUSED(buffer);
+    UNUSED(length);
+
+    return 0;
+}
+
+void(dummy_flush)(void) {}
+
+const flashGeometry_t *(dummy_getGeometry)(void)
+{
+    static const flashGeometry_t fgNone = {0};
+
+    return &fgNone;
+}
+
+static const flashDriver_t flashDrivers[] = {
 
 #ifdef USE_SPI
 
 #ifdef USE_FLASH_M25P16
-    {.init = m25p16_init,
-     .isReady = m25p16_isReady,
-     .waitForReady = m25p16_waitForReady,
-     .eraseSector = m25p16_eraseSector,
-     .eraseCompletely = m25p16_eraseCompletely,
-     .pageProgram = m25p16_pageProgram,
-     .readBytes = m25p16_readBytes,
-     .getGeometry = m25p16_getGeometry,
-     .flush = NULL,
-     .detected = true
+    {
+        .init = m25p16_init,
+        .isReady = m25p16_isReady,
+        .waitForReady = m25p16_waitForReady,
+        .eraseSector = m25p16_eraseSector,
+        .eraseCompletely = m25p16_eraseCompletely,
+        .pageProgram = m25p16_pageProgram,
+        .readBytes = m25p16_readBytes,
+        .getGeometry = m25p16_getGeometry,
+        .flush = NULL,
     },
 #endif
 
 #ifdef USE_FLASH_W25N01G
-    {.init = w25n01g_init,
-     .isReady = w25n01g_isReady,
-     .waitForReady = w25n01g_waitForReady,
-     .eraseSector = w25n01g_eraseSector,
-     .eraseCompletely = w25n01g_eraseCompletely,
-     .pageProgram = w25n01g_pageProgram,
-     .readBytes = w25n01g_readBytes,
-     .getGeometry = w25n01g_getGeometry,
-     .flush = w25n01g_flush,
-     .detected = true
+    {
+        .init = w25n01g_init,
+        .isReady = w25n01g_isReady,
+        .waitForReady = w25n01g_waitForReady,
+        .eraseSector = w25n01g_eraseSector,
+        .eraseCompletely = w25n01g_eraseCompletely,
+        .pageProgram = w25n01g_pageProgram,
+        .readBytes = w25n01g_readBytes,
+        .getGeometry = w25n01g_getGeometry,
+        .flush = w25n01g_flush,
     },
 #endif
 
 #endif
 
+    // this entry keeps access to flash functions working, even if no flash
+    // was detected.
+    {
+        .init = dummy_init,
+        .isReady = dummy_isReady,
+        .waitForReady = dummy_waitForReady,
+        .eraseSector = dummy_eraseSector,
+        .eraseCompletely = dummy_eraseCompletely,
+        .pageProgram = dummy_pageProgram,
+        .readBytes = dummy_readBytes,
+        .getGeometry = dummy_getGeometry,
+        .flush = dummy_flush,
+    },
+
 };
 
-static flashDriver_t *flash;
+static flashDriver_t *flash = &flashDrivers[(sizeof(flashDrivers) / sizeof(flashDrivers[0])) - 1];
 
 static bool flashDeviceInit(void)
 {
-    for (uint32_t idx = 0; idx <= sizeof(flashDrivers) / sizeof(flashDrivers[0]); idx++)
-    {
-        flash->detected = flashDrivers[idx].init(0);
-        if (flash->detected)
-        {
+    bool detected = false;
+    for (uint32_t idx = 0; idx <= sizeof(flashDrivers) / sizeof(flashDrivers[0]); idx++) {
+        detected = flashDrivers[idx].init(0);
+        if (detected) {
             flash = &flashDrivers[idx];
             break;
         }
     }
-    return flash->detected;
+    return detected;
 }
 
 bool flashIsReady(void)
 {
-    if (!flash->detected) {
-        return false;
-    }
-
     return flash->isReady();
 }
 
@@ -145,12 +194,6 @@ void flashFlush(void)
 
 const flashGeometry_t *flashGetGeometry(void)
 {
-    static flashGeometry_t fgNone = {0};
-
-    if (!flash->detected) {
-        return &fgNone;
-    }
-
     return flash->getGeometry();
 }
 
@@ -290,12 +333,10 @@ bool flashInit(void)
     memset(&flashPartitionTable, 0, sizeof(flashPartitionTable));
 
     bool haveFlash = flashDeviceInit();
-    
-    if (!haveFlash) {
-        return false;
-    }
 
-    flashConfigurePartitions();
+    if (haveFlash) {
+        flashConfigurePartitions();
+    }
 
     return haveFlash;
 }
